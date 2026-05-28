@@ -481,25 +481,53 @@ async function getIlanzouDownloadUrl(fileIds, uuid) {
 
 async function parseLanzou(url, pwd) {
     url = url.trim();
-    const idMatch = url.match(/(?:lanzou[a-z]{0,2}\.com)\/(?:tp\/)?([a-zA-Z0-9_\-]+)(\?[\s\S]*)?/i);
-    if (!idMatch) return { success: false, msg: '无效的分享链接' };
-    const shareId = idMatch[1];
-    const queryStr = idMatch[2] || '';
+    // 提取原始域名和分享ID（兼容子域名如 wwbjq.lanzoub.com）
+    const urlMatch = url.match(/(?:https?:\/\/)?([a-z0-9-]+\.)?(lanzou[a-z]{0,2}\.com)\/(?:tp\/)?([a-zA-Z0-9_\-]+)(\?[\s\S]*)?/i);
+    if (!urlMatch) return { success: false, msg: '无效的分享链接' };
+    const originalDomain = (urlMatch[1] || '') + urlMatch[2];
+    const shareId = urlMatch[3];
+    const queryStr = urlMatch[4] || '';
 
-    const domains = ['www.lanzoui.com','www.lanzouo.com','www.lanzoux.com','www.lanzouw.com'];
-    let html = null, usedDomain = null;
+    // 构建现代浏览器请求头（去掉Sec-Fetch-*避免Worker环境下异常）
+    const MODERN_HEADERS = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+        'Accept-Encoding': 'gzip, deflate',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
+        'Cache-Control': 'max-age=0',
+        'DNT': '1',
+        'Priority': 'u=0, i',
+        'Sec-CH-UA': '"Chromium";v="140", "Not=A?Brand";v="24", "Microsoft Edge";v="140"',
+        'Sec-CH-UA-Mobile': '?0',
+        'Sec-CH-UA-Platform': '"macOS"',
+        'Upgrade-Insecure-Requests': '1',
+    };
 
-    for (const domain of domains) {
-        try {
-            const resp = await fetch(`https://${domain}/${shareId}${queryStr}`, {
-                headers: { ...LANZOU_HEADERS, 'User-Agent': DESKTOP_UA, 'Referer': `https://${domain}/` },
+    // 使用原始域名请求（仅尝试1次，不行就报错）
+    let html = null, usedDomain = originalDomain;
+    
+    const pageResp = await fetch(`https://${usedDomain}/${shareId}${queryStr}`, {
+        headers: { ...MODERN_HEADERS, 'Referer': `https://${usedDomain}/` },
+        redirect: 'follow'
+    });
+    const pageText = await pageResp.text();
+    
+    // 处理acw_sc__v2反爬
+    let finalHtml = pageText;
+    for (let i = 0; i < 3 && /arg1='([^']+)';/.test(finalHtml); i++) {
+        const acwMatch = finalHtml.match(/arg1='([^']+)';/);
+        if (acwMatch) {
+            const acwCookie = `acw_sc__v2=${acwScV2Simple(acwMatch[1])}`;
+            const retryResp = await fetch(`https://${usedDomain}/${shareId}${queryStr}`, {
+                headers: { ...MODERN_HEADERS, 'Referer': `https://${usedDomain}/`, 'Cookie': acwCookie },
                 redirect: 'follow'
             });
-            const text = await resp.text();
-            if (resp.ok && text.length > 500) { html = text; usedDomain = domain; break; }
-        } catch (e) { continue; }
+            finalHtml = await retryResp.text();
+        }
     }
-    if (!html) return { success: false, msg: '无法访问分享页面' };
+    html = finalHtml;
+    
+    if (!html || html.length < 100) return { success: false, msg: '无法访问分享页面' };
 
     if (/来晚[啦了]|文件取消分享|文件不存在|页面不存在|已被删除|sharedeleted/i.test(html))
         return { success: false, msg: '文件不存在或取消分享了' };
@@ -599,12 +627,44 @@ async function parseLanzou(url, pwd) {
     const wskm = cleaned.match(/'([a-zA-Z0-9]{4})'/);
     const websignkey = wskm ? wskm[1] : '';
 
-    const ajaxResp = await fetch(`https://${usedDomain}/ajaxm.php?file=${fileid}`, {
-        method: 'POST',
-        headers: { ...LANZOU_HEADERS, 'User-Agent': DESKTOP_UA, 'Content-Type':'application/x-www-form-urlencoded', 'Referer': `https://${usedDomain}/` },
-        body: new URLSearchParams({ action:'downprocess', sign, p:pwd||'', websign, websignkey }).toString()
-    });
-    const ajaxText = await ajaxResp.text();
+    const kdMatch = cleaned.match(/kdns\s*=\s*(\d+)/);
+    const kd = kdMatch ? kdMatch[1] : '1';
+
+    // 使用原始域名发起ajaxm.php POST请求，添加acw_sc__v2重试
+    let ajaxText = null;
+    let ajaxCookie = '';
+    for (let retry = 0; retry < 3; retry++) {
+        const ajaxHeaders = {
+            'User-Agent': MODERN_HEADERS['User-Agent'],
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Origin': `https://${usedDomain}`,
+            'Referer': `https://${usedDomain}/${shareId}`,
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json, text/javascript, */*; q=0.01',
+            'Accept-Encoding': 'gzip, deflate',
+            'DNT': '1',
+            'Priority': 'u=0, i',
+            'Sec-CH-UA': MODERN_HEADERS['Sec-CH-UA'],
+            'Sec-CH-UA-Mobile': '?0',
+            'Sec-CH-UA-Platform': '"macOS"',
+        };
+        if (ajaxCookie) ajaxHeaders['Cookie'] = ajaxCookie;
+
+        const ajaxResp = await fetch(`https://${usedDomain}/ajaxm.php?file=${fileid}`, {
+            method: 'POST',
+            headers: ajaxHeaders,
+            body: new URLSearchParams({ action:'downprocess', sign, kd, p:pwd||'' }).toString()
+        });
+        ajaxText = await ajaxResp.text();
+
+        // 检测acw_sc__v2反爬 → 重新生成cookie重试
+        const acwMatch = ajaxText.match(/arg1='([^']+)';/);
+        if (acwMatch) {
+            ajaxCookie = `acw_sc__v2=${acwScV2Simple(acwMatch[1])}`;
+            continue;
+        }
+        break; // 无反爬则退出重试
+    }
 
     let json;
     try { json = JSON.parse(ajaxText); }
@@ -618,7 +678,7 @@ async function parseLanzou(url, pwd) {
     if (json.zt === 1) {
         if (json.inf) info.name = json.inf;
         info.url = `${json.dom}/file/${json.url}`;
-        const directUrl = await getLanzouDirectLink(info.url);
+        const directUrl = await getLanzouDirectLink(info.url, usedDomain);
         info.download_url = directUrl || info.url;
         return { success: true, msg: '解析成功', type: 'lanzou', file_id: info.fid, file_name: info.name||'', file_size: info.size||'', download_url: info.download_url };
     } else {
@@ -629,64 +689,73 @@ async function parseLanzou(url, pwd) {
     }
 }
 
-async function getLanzouDirectLink(url) {
-    const headers = { ...LANZOU_HEADERS, 'User-Agent': DESKTOP_UA, 'Cookie': 'down_ip=1', 'Referer': 'https://www.lanzoui.com/' };
-
-    const resp1 = await fetch(url, { headers, redirect: 'manual' });
-    if (resp1.status >= 300 && resp1.status < 400) {
-        const loc = resp1.headers.get('Location');
-        if (loc) return loc;
-    }
-    const body1 = await resp1.text();
-
-    const argMatch = body1.match(/arg1='(.+?)'/);
-    if (argMatch) {
-        const acw = acwScV2(argMatch[1]);
-        headers['Cookie'] = `down_ip=1; acw_sc__v2=${acw}`;
-        const resp2 = await fetch(url, { headers, redirect: 'manual' });
-        if (resp2.status >= 300 && resp2.status < 400) {
-            const loc = resp2.headers.get('Location');
-            if (loc) return loc;
+/**
+ * acw_sc__v2 反爬算法（位置重排 + XOR掩码）
+ * 匹配 lanzou 当前使用的版本
+ */
+function acwScV2Simple(arg1) {
+    const posList = [15,35,29,24,33,16,1,38,10,9,19,31,40,27,22,23,25,13,6,11,39,18,20,8,14,21,32,26,2,30,7,4,17,5,3,28,34,37,12,36];
+    const mask = '3000176000856006061501533003690027800375';
+    const outPutList = new Array(40).fill('');
+    for (let i = 0; i < arg1.length; i++) {
+        for (let j = 0; j < posList.length; j++) {
+            if (posList[j] === i + 1) outPutList[j] = arg1[i];
         }
     }
-
-    headers['User-Agent'] = MOBILE_UA;
-    const resp3 = await fetch(url, { headers, redirect: 'manual' });
-    if (resp3.status >= 300 && resp3.status < 400) {
-        const loc = resp3.headers.get('Location');
-        if (loc) return loc;
-    }
-    const body3 = await resp3.text();
-    const dlMatch = body3.match(/<a\s+[^>]*href="([^"]*download[^"]*)"/i) ||
-                    body3.match(/<a\s+[^>]*href="([^"]*down[^"]*)"/i) ||
-                    body3.match(/<a\s+href="(https?:\/\/[^"\s]+)"/i);
-    return dlMatch ? dlMatch[1] : '';
-}
-
-function acwScV2(arg1) {
-    const str = arg1;
-    const len = str.length;
-    let base = '';
-    for (let i = 0; i < len; i++) base += (str.charCodeAt(i) ^ 0x13).toString(16).padStart(2, '0');
-
-    const keys = [];
-    for (let i = 0; i < 256; i++) keys[i] = i;
-    let j = 0;
-    for (let i = 0; i < 256; i++) {
-        j = (j + keys[i] + str.charCodeAt(i % len)) % 256;
-        [keys[i], keys[j]] = [keys[j], keys[i]];
-    }
-
+    const arg2 = outPutList.join('');
     let result = '';
-    let a = 0, b = 0;
-    for (let i = 0; i < base.length; i++) {
-        a = (a + 1) % 256;
-        b = (b + keys[a]) % 256;
-        [keys[a], keys[b]] = [keys[b], keys[a]];
-        result += String.fromCharCode(parseInt(base[i], 16) ^ keys[(keys[a] + keys[b]) % 256]);
+    const length = Math.min(arg2.length, 40);
+    for (let i = 0; i < length; i += 2) {
+        const xorResult = (parseInt(arg2.substr(i, 2), 16) ^ parseInt(mask.substr(i, 2), 16)).toString(16);
+        result += xorResult.padStart(2, '0');
     }
-    return md5(result);
+    return result;
 }
+
+async function getLanzouDirectLink(url, refererDomain = '') {
+    const MODERN_HEADERS2 = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
+        'Accept-Encoding': 'gzip, deflate',
+        'DNT': '1',
+        'Priority': 'u=0, i',
+        'Sec-CH-UA': '"Chromium";v="140", "Not=A?Brand";v="24", "Microsoft Edge";v="140"',
+        'Sec-CH-UA-Mobile': '?0',
+        'Sec-CH-UA-Platform': '"macOS"',
+        'Upgrade-Insecure-Requests': '1',
+    };
+
+    // 构建下载页referer
+    const refDomain = refererDomain || 'www.lanzoui.com';
+    let dlCookie = 'down_ip=1';
+
+    // acw重试循环
+    for (let retry = 0; retry < 3; retry++) {
+        const resp = await fetch(url, {
+            headers: { ...MODERN_HEADERS2, 'Cookie': dlCookie, 'Referer': `https://${refDomain}/` },
+            redirect: 'manual'
+        });
+
+        // 302跳转 → 直接返回直链
+        if (resp.status >= 300 && resp.status < 400) {
+            const loc = resp.headers.get('Location');
+            if (loc) return loc;
+        }
+
+        const body = await resp.text();
+        const argMatch = body.match(/arg1='(.+?)';/);
+        if (argMatch) {
+            dlCookie = `down_ip=1; acw_sc__v2=${acwScV2Simple(argMatch[1])}`;
+            continue;
+        }
+        break;
+    }
+    return '';
+}
+
+
+
 
 function md5(str) {
     function md5cycle(x, k) {
@@ -1623,4 +1692,3 @@ export default {
         return jsonResponse({ success: false, msg: '未知路由' }, 404);
     }
 };
-
