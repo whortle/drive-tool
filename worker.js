@@ -340,13 +340,13 @@ function solveAcwV2(html) {
  * 蓝奏云账号密码登录（通过 accounts.woozooo.com 登录中心）
  * 
  * 流程:
- * 1. GET accounts.woozooo.com 登录页 → acw 挑战(获取 arg1)
+ * 1. GET accounts.woozooo.com 登录页 → acw 挑战(获取 arg1) + 提取 acw_tc cookie
  * 2. 解算 acw_sc__v2 cookie
  * 3. POST 到 /accounts.php (task=uselogin) → 获得 JSON {zt:1, msgs:跳转URL}
  * 4. GET 跳转URL (pc.woozooo.com/acc.php?t=...) → 获得 PHPSESSID, ylogin, phpdisk_info
  */
 async function login(username, password) {
-    // ====== 第1步: GET 触发 acw 挑战 ======
+    // ====== 第1步: GET 触发 acw 挑战，提取所有 cookie ======
     const resp1 = await fetch(LOGIN_URL, {
         method: 'GET',
         headers: {
@@ -357,13 +357,22 @@ async function login(username, password) {
         redirect: 'manual'
     });
     const html1 = await resp1.text();
+    
+    // 从第一次响应提取所有 cookies (acw_tc, cdn_sec_tc 等)
+    const resp1Cookies = parseSetCookie(resp1.headers);
+    
     const acwVal = solveAcwV2(html1);
     if (!acwVal) {
         return { success: false, msg: '登录页面未触发 acw 挑战，无法继续' };
     }
 
+    // 构建完整 cookie 串 (acw_tc 也可能需要)
+    const cookieParts = [`acw_sc__v2=${acwVal}`];
+    if (resp1Cookies.acw_tc) cookieParts.push(`acw_tc=${resp1Cookies.acw_tc}`);
+    if (resp1Cookies.cdn_sec_tc) cookieParts.push(`cdn_sec_tc=${resp1Cookies.cdn_sec_tc}`);
+    const cookieStr = cookieParts.join('; ');
+
     // ====== 第2步: POST 发登录请求 ======
-    // 只需带 acw_sc__v2 cookie，不需要 PHPSESSID
     const postResp = await fetch(ACCOUNTS_API, {
         method: 'POST',
         headers: {
@@ -374,7 +383,7 @@ async function login(username, password) {
             'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
             'X-Requested-With': 'XMLHttpRequest',
             'Accept': 'application/json, text/javascript, */*; q=0.01',
-            'Cookie': `acw_sc__v2=${acwVal}`,
+            'Cookie': cookieStr,
         },
         body: new URLSearchParams({
             task: 'uselogin',
@@ -384,14 +393,47 @@ async function login(username, password) {
         }).toString(),
         redirect: 'manual'
     });
-    const body = await postResp.text();
 
     // ====== 第3步: 解析登录响应 ======
+    // 优先用 JSON
     let bodyData;
+    const contentType = postResp.headers.get('content-type') || '';
+    
+    if (postResp.status === 302 || postResp.status === 301) {
+        // 如果是重定向，从 Location 头获取信息
+        const location = postResp.headers.get('location');
+        if (location && location.includes('acc.php')) {
+            // 直接跟随重定向获取 cookies
+            const okResp = await fetch(location, {
+                method: 'GET',
+                headers: {
+                    ...LANZOU_HEADERS, 'User-Agent': DESKTOP_UA,
+                    'Referer': LOGIN_URL,
+                    'Cookie': cookieStr,
+                },
+                redirect: 'follow'
+            });
+            const accCookies = parseSetCookie(okResp.headers);
+            const phpsessid = accCookies.PHPSESSID || '';
+            const ylogin = accCookies.ylogin || '';
+            const phpdisk_info = accCookies.phpdisk_info || '';
+            if (phpsessid && ylogin) {
+                return { success: true, msg:'登录成功', cookies:{ PHPSESSID:phpsessid, ylogin, phpdisk_info } };
+            }
+        }
+        return { success: false, msg: '登录被重定向: ' + (location || '无 Location') + ', status: ' + postResp.status };
+    }
+    
+    // 尝试 JSON 解析
+    const body = await postResp.text();
     try { bodyData = JSON.parse(body); } catch (e) {
-        // POST 也可能触发 acw 挑战（极小概率）
+        // 检查是否是 acw 挑战
         const retryAcw = solveAcwV2(body);
         if (retryAcw) {
+            // 重试 POST
+            const newCookie = resp1Cookies.acw_tc 
+                ? `acw_sc__v2=${retryAcw}; acw_tc=${resp1Cookies.acw_tc}`
+                : `acw_sc__v2=${retryAcw}`;
             const retryResp = await fetch(ACCOUNTS_API, {
                 method: 'POST',
                 headers: {
@@ -400,7 +442,7 @@ async function login(username, password) {
                     'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
                     'X-Requested-With': 'XMLHttpRequest',
                     'Accept': 'application/json, text/javascript, */*; q=0.01',
-                    'Cookie': `acw_sc__v2=${retryAcw}`,
+                    'Cookie': newCookie,
                 },
                 body: new URLSearchParams({
                     task: 'uselogin', username, password, ref: 'pc.woozooo.com',
@@ -409,14 +451,14 @@ async function login(username, password) {
             });
             const retryBody = await retryResp.text();
             try { bodyData = JSON.parse(retryBody); } catch (e2) {
-                return { success: false, msg: '登录响应解析失败(重试后)，原始: ' + retryBody.substring(0, 200) + '，headers: ' + JSON.stringify([...retryResp.headers]) };
+                return { success: false, msg: '登录失败(重试后)，状态:' + retryResp.status + '，Content-Type:' + retryResp.headers.get('content-type') + '，原始:' + retryBody.substring(0, 300) };
             }
         } else {
-            return { success: false, msg: '登录响应解析失败，原始: ' + body.substring(0, 200) + '，headers: ' + JSON.stringify([...postResp.headers]) };
+            return { success: false, msg: '登录失败，状态:' + postResp.status + '，Content-Type:' + contentType + '，原始:' + body.substring(0, 300) };
         }
     }
 
-    // zt=1 表示登录成功（zt 是整数，不是字符串）
+    // zt=1 表示登录成功
     if (String(bodyData.zt) !== '1') {
         return { success: false, msg: bodyData.msgs || bodyData.info || '登录失败，请检查账号密码是否正确' };
     }
@@ -433,7 +475,7 @@ async function login(username, password) {
             ...LANZOU_HEADERS,
             'User-Agent': DESKTOP_UA,
             'Referer': LOGIN_URL,
-            'Cookie': `acw_sc__v2=${acwVal}`,
+            'Cookie': cookieStr,
         },
         redirect: 'follow'
     });
@@ -445,7 +487,7 @@ async function login(username, password) {
     const phpdisk_info = accCookies.phpdisk_info || '';
 
     if (!phpsessid || !ylogin) {
-        return { success: false, msg: `获取 Cookie 失败，仅获得: PHPSESSID=${phpsessid}, ylogin=${ylogin}` };
+        return { success: false, msg: `获取 Cookie 失败，状态:${accResp.status}，仅获得: PHPSESSID=${phpsessid}, ylogin=${ylogin}` };
     }
 
     return {
