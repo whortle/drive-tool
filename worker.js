@@ -1,7 +1,7 @@
 /**
  * ============================================================================
  * @name        蓝奏云 Worker 工具
- * @version     1.0.0
+ * @version     1.1.0
  * @author      南烛 (whortle)
  * @license     MIT
  * @repository  https://github.com/whortle/drive-tool
@@ -271,23 +271,169 @@ function lanzouHeaders(cookie, referer = 'https://pc.woozooo.com/mydisk.php') {
     return { ...LANZOU_HEADERS, 'User-Agent': DESKTOP_UA, 'Referer': referer, 'Accept-Encoding': 'gzip, deflate, br', 'Accept': '*/*', 'Origin': 'https://pc.woozooo.com', 'Cookie': cookie };
 }
 
-async function login(username, password) {
-    const resp = await fetch(LOGIN_URL, {
-        method: 'POST',
-        headers: { ...LANZOU_HEADERS, 'User-Agent': DESKTOP_UA, 'Referer': LOGIN_URL, 'Origin': 'https://up.woozooo.com', 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ task:'3', uid:username, pwd:password, setSessionId:'', setSig:'', setScene:'', setTocen:'', formhash:'' }).toString(),
+/**
+ * 解析 Set-Cookie 头为对象
+ */
+function parseSetCookie(setCookieHeader) {
+    const cookies = {};
+    if (!setCookieHeader) return cookies;
+    const parts = setCookieHeader.split(/,+(?=[^;=,]+=)/);
+    for (const part of parts) {
+        const m = part.match(/^\s*([^=;\s]+)=([^;]*)/);
+        if (m) cookies[m[1].trim()] = m[2].trim();
+    }
+    return cookies;
+}
+
+/**
+ * 解算 acw_sc__v2 反爬 Cookie
+ * @param {string} html - 包含 arg1 的 acw 挑战页面 HTML
+ * @returns {string|null} acw_sc__v2 cookie 值
+ */
+function solveAcwV2(html) {
+    const m = html.match(/arg1='([^']+)'/);
+    if (!m) return null;
+    const arg1 = m[1];
+    // 排列数组（固定）
+    const perm = [15, 35, 29, 24, 33, 16, 1, 38, 10, 9, 19, 31, 40, 27, 22, 23,
+                  25, 13, 6, 11, 39, 18, 20, 8, 14, 21, 32, 26, 2, 30, 7, 4,
+                  17, 5, 3, 28, 34, 37, 12, 36];
+    const mask = '3000176000856006061501533003690027800375';
+    // 排列: permuted[j] = arg1[perm[j] - 1]
+    let u = '';
+    for (let j = 0; j < perm.length; j++) {
+        u += arg1[perm[j] - 1];
+    }
+    // XOR
+    let result = '';
+    for (let i = 0; i < u.length; i += 2) {
+        const x = parseInt(u.substring(i, i + 2), 16) ^ parseInt(mask.substring(i, i + 2), 16);
+        result += x.toString(16).padStart(2, '0');
+    }
+    return result;
+}
+
+/**
+ * 带 acw 反爬拦截的 GET 请求
+ * 自动处理 acw_sc__v2 挑战
+ */
+async function fetchWithAcw(url, headers = {}) {
+    // 第一次请求，触发 acw 挑战
+    const resp1 = await fetch(url, {
+        method: 'GET',
+        headers: { ...LANZOU_HEADERS, 'User-Agent': DESKTOP_UA, ...headers },
         redirect: 'manual'
     });
-    const body = await resp.text();
-    const cookies = {};
-    const scHeaders = resp.headers.get('set-cookie') || '';
-    for (const m of scHeaders.matchAll(/([^=,\s]+)=([^;,\s]+)/g)) { if (m[1] && m[2]) cookies[m[1].trim()] = m[2].trim(); }
+    const html1 = await resp1.text();
+    const acw = solveAcwV2(html1);
+    if (!acw) {
+        // 没有 acw 挑战，直接返回
+        const c1 = parseSetCookie(resp1.headers.get('set-cookie') || '');
+        return { status: resp1.status, html: html1, cookies: c1, acw: '' };
+    }
+    // 第二次请求，带 acw cookie
+    const acwCookie = `acw_sc__v2=${acw}`;
+    const resp2 = await fetch(url, {
+        method: 'GET',
+        headers: {
+            ...LANZOU_HEADERS, 'User-Agent': DESKTOP_UA, ...headers,
+            'Cookie': acwCookie,
+        },
+        redirect: 'manual'
+    });
+    const html2 = await resp2.text();
+    const c2 = parseSetCookie(resp2.headers.get('set-cookie') || '');
+    return { status: resp2.status, html: html2, cookies: c2, acw: acw };
+}
+
+/**
+ * 蓝奏云账号密码登录
+ * 
+ * 流程:
+ * 1. GET mlogin.php → acw 挑战(获取 arg1) 
+ * 2. 解算 acw_sc__v2 cookie
+ * 3. 带 acw cookie 重新 GET → 获得 PHPSESSID
+ * 4. POST 登录(带 PHPSESSID + acw cookie) → 获得 ylogin + phpdisk_info
+ */
+async function login(username, password) {
+    // 1-3. 通过 acw 防护获取 PHPSESSID
+    const acwResult = await fetchWithAcw(LOGIN_URL, { 'Referer': 'https://up.woozooo.com/' });
+    const phpsessid = acwResult.cookies.PHPSESSID || '';
+    const acwCookie = acwResult.acw;
+
+    if (!phpsessid) {
+        return { success: false, msg: '获取 Session 失败，服务器返回了 acw 挑战但未获得 PHPSESSID' };
+    }
+
+    // 4. 用 Session 发起 POST 登录
+    const cookieStr = `PHPSESSID=${phpsessid}` + (acwCookie ? `; acw_sc__v2=${acwCookie}` : '');
+    const postResp = await fetch(LOGIN_URL, {
+        method: 'POST',
+        headers: {
+            ...LANZOU_HEADERS,
+            'User-Agent': DESKTOP_UA,
+            'Referer': LOGIN_URL,
+            'Origin': 'https://up.woozooo.com',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json, text/javascript, */*; q=0.01',
+            'Cookie': cookieStr,
+        },
+        body: new URLSearchParams({ task: '3', uid: username, pwd: password, formhash: '03e22cb9' }).toString(),
+        redirect: 'manual'
+    });
+    const body = await postResp.text();
+
+    // 5. 解析登录响应和 Cookie
+    const loginCookies = parseSetCookie(postResp.headers.get('set-cookie') || '');
     let bodyData;
-    try { bodyData = JSON.parse(body); } catch (e) { return { success: false, msg: '登录响应解析失败' }; }
-    if (!bodyData || bodyData.zt !== 1) return { success: false, msg: '登录失败，请检查账号密码是否正确' };
-    if (!cookies.ylogin) cookies.ylogin = String(bodyData.id || '');
-    if (!cookies.PHPSESSID) cookies.PHPSESSID = '';
-    return { success: true, msg: '登录成功', cookies: { PHPSESSID: cookies.PHPSESSID || '', ylogin: cookies.ylogin || '', phpdisk_info: cookies.phpdisk_info || '' } };
+    try { bodyData = JSON.parse(body); } catch (e) {
+        // 如果 POST 也触发 acw 挑战，尝试重解
+        const retryAcw = solveAcwV2(body);
+        if (retryAcw) {
+            const retryCookie = `PHPSESSID=${phpsessid}; acw_sc__v2=${retryAcw}`;
+            const retryResp = await fetch(LOGIN_URL, {
+                method: 'POST',
+                headers: {
+                    ...LANZOU_HEADERS, 'User-Agent': DESKTOP_UA,
+                    'Referer': LOGIN_URL, 'Origin': 'https://up.woozooo.com',
+                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json, text/javascript, */*; q=0.01',
+                    'Cookie': retryCookie,
+                },
+                body: new URLSearchParams({ task: '3', uid: username, pwd: password, formhash: '03e22cb9' }).toString(),
+                redirect: 'manual'
+            });
+            const retryBody = await retryResp.text();
+            const retryCookies = parseSetCookie(retryResp.headers.get('set-cookie') || '');
+            try {
+                bodyData = JSON.parse(retryBody);
+                Object.assign(loginCookies, retryCookies);
+            } catch (e2) {
+                return { success: false, msg: '登录响应解析失败，原始响应: ' + retryBody.substring(0, 100) };
+            }
+        } else {
+            return { success: false, msg: '登录响应解析失败，原始响应: ' + body.substring(0, 100) };
+        }
+    }
+
+    if (bodyData.zt !== 1) {
+        return { success: false, msg: bodyData.info || bodyData.msg || '登录失败，请检查账号密码是否正确' };
+    }
+
+    // 6. 组装 Cookie
+    const ylogin = loginCookies.ylogin || String(bodyData.id || '');
+    const phpdisk_info = loginCookies.phpdisk_info || '';
+    return {
+        success: true,
+        msg: '登录成功',
+        cookies: {
+            PHPSESSID: phpsessid,
+            ylogin: ylogin,
+            phpdisk_info: phpdisk_info,
+        }
+    };
 }
 
 async function getDirList(phpsessid, ylogin, phpdiskInfo, folderId = -1) {
