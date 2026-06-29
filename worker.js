@@ -336,87 +336,53 @@ function solveAcwV2(html) {
 }
 
 /**
- * 带 acw 反爬拦截的 GET 请求
- * 自动处理 acw_sc__v2 挑战
- */
-async function fetchWithAcw(url, headers = {}) {
-    // 第一次请求，触发 acw 挑战
-    const resp1 = await fetch(url, {
-        method: 'GET',
-        headers: { ...LANZOU_HEADERS, 'User-Agent': DESKTOP_UA, ...headers },
-        redirect: 'manual'
-    });
-    const html1 = await resp1.text();
-    const acw = solveAcwV2(html1);
-    // 先解析 resp1 的 cookies（可能包含 PHPSESSID）
-    const c1 = parseSetCookie(resp1.headers);
-    if (!acw) {
-        // 没有 acw 挑战，直接返回
-        return { status: resp1.status, html: html1, cookies: c1, acw: '' };
-    }
-    // 第二次请求，带 acw cookie
-    const acwCookie = `acw_sc__v2=${acw}`;
-    const resp2 = await fetch(url, {
-        method: 'GET',
-        headers: {
-            ...LANZOU_HEADERS, 'User-Agent': DESKTOP_UA, ...headers,
-            'Cookie': acwCookie,
-        },
-        redirect: 'manual'
-    });
-    const html2 = await resp2.text();
-    const c2 = parseSetCookie(resp2.headers);
-    // 合并 resp1 和 resp2 的 cookies（resp1 可能先设置了 PHPSESSID）
-    const mergedCookies = { ...c1, ...c2 };
-    return { status: resp2.status, html: html2, cookies: mergedCookies, acw: acw };
-}
-
-/**
  * 蓝奏云账号密码登录
  * 
  * 流程:
- * 1. GET mlogin.php → acw 挑战(获取 arg1) 
+ * 1. GET mlogin.php → acw 挑战(获取 arg1) + 获取 acw_tc/cdn_sec_tc
  * 2. 解算 acw_sc__v2 cookie
- * 3. 带 acw cookie 重新 GET → 获得 PHPSESSID
- * 4. POST 登录(带 PHPSESSID + acw cookie) → 获得 ylogin + phpdisk_info
+ * 3. 带 acw cookie 重新 GET → 获得 PHPSESSID + 登录页面 HTML
+ * 4. POST 登录(带 PHPSESSID) → 获得 ylogin + phpdisk_info
  */
-/**
- * 从页面 HTML 中提取 formhash
- */
-function extractFormhash(html) {
-    // 匹配 var formhash = 'xxx' 或 formhash: 'xxx' 或 name="formhash" value="xxx"
-    const patterns = [
-        /formhash\s*[=:]\s*['"](\w+)['"]/,
-        /name=['"]formhash['"]\s+value=['"](\w+)['"]/,
-        /id=['"]formhash['"]\s+value=['"](\w+)['"]/,
-        /formhash['"]?\s*:\s*['"](\w+)['"]/,
-    ];
-    for (const p of patterns) {
-        const m = html.match(p);
-        if (m) return m[1];
-    }
-    return null;
-}
-
 async function login(username, password) {
-    // 1-3. 通过 acw 防护获取 PHPSESSID 和页面 HTML
-    const acwResult = await fetchWithAcw(LOGIN_URL, { 'Referer': 'https://up.woozooo.com/' });
-    const phpsessid = acwResult.cookies.PHPSESSID || '';
-    const acwCookie = acwResult.acw;
-    const pageHtml = acwResult.html;
+    // ====== 第1步: GET 触发 acw 挑战 ======
+    const resp1 = await fetch(LOGIN_URL, {
+        method: 'GET',
+        headers: {
+            ...LANZOU_HEADERS,
+            'User-Agent': DESKTOP_UA,
+            'Referer': 'https://up.woozooo.com/',
+        },
+        redirect: 'manual'
+    });
+    const html1 = await resp1.text();
+    const acwVal = solveAcwV2(html1);
+    if (!acwVal) {
+        return { success: false, msg: '登录页面未触发 acw 挑战，无法继续' };
+    }
 
+    // ====== 第2步: 带 acw cookie 重 GET，获取 PHPSESSID 和登录页面 ======
+    // 使用 redirect: 'follow' 确保获取到最终页面内容
+    const resp2 = await fetch(LOGIN_URL, {
+        method: 'GET',
+        headers: {
+            ...LANZOU_HEADERS,
+            'User-Agent': DESKTOP_UA,
+            'Referer': 'https://up.woozooo.com/',
+            'Cookie': `acw_sc__v2=${acwVal}`,
+        },
+        redirect: 'follow'
+    });
+    const html2 = await resp2.text();
+
+    // 从 headers 中提取 PHPSESSID（可能来自重定向过程中的任意 Set-Cookie）
+    const phpsessid = extractCookieValue(resp2.headers, 'PHPSESSID');
     if (!phpsessid) {
-        return { success: false, msg: '获取 Session 失败，服务器返回了 acw 挑战但未获得 PHPSESSID' };
+        return { success: false, msg: '获取 Session 失败，未获得 PHPSESSID cookie' };
     }
 
-    // 从页面提取动态 formhash
-    let formhash = extractFormhash(pageHtml);
-    if (!formhash) {
-        formhash = '03e22cb9'; // fallback
-    }
-
-    // 4. 用 Session 发起 POST 登录
-    const cookieStr = `PHPSESSID=${phpsessid}` + (acwCookie ? `; acw_sc__v2=${acwCookie}` : '');
+    // ====== 第3步: POST 登录 ======
+    const cookieStr = `PHPSESSID=${phpsessid}; acw_sc__v2=${acwVal}`;
     const postResp = await fetch(LOGIN_URL, {
         method: 'POST',
         headers: {
@@ -429,16 +395,21 @@ async function login(username, password) {
             'Accept': 'application/json, text/javascript, */*; q=0.01',
             'Cookie': cookieStr,
         },
-        body: new URLSearchParams({ task: '3', uid: username, pwd: password, formhash: formhash }).toString(),
+        body: new URLSearchParams({
+            task: '3',
+            uid: username,
+            pwd: password,
+            formhash: '03e22cb9',
+        }).toString(),
         redirect: 'manual'
     });
     const body = await postResp.text();
 
-    // 5. 解析登录响应和 Cookie
-    const loginCookies = parseSetCookie(postResp.headers);
+    // ====== 第4步: 解析登录响应 ======
+    // 先尝试解析 JSON
     let bodyData;
     try { bodyData = JSON.parse(body); } catch (e) {
-        // 如果 POST 也触发 acw 挑战，尝试重解
+        // 如果 POST 也触发 acw 挑战（极小概率），尝试重解后重试
         const retryAcw = solveAcwV2(body);
         if (retryAcw) {
             const retryCookie = `PHPSESSID=${phpsessid}; acw_sc__v2=${retryAcw}`;
@@ -452,19 +423,17 @@ async function login(username, password) {
                     'Accept': 'application/json, text/javascript, */*; q=0.01',
                     'Cookie': retryCookie,
                 },
-                body: new URLSearchParams({ task: '3', uid: username, pwd: password, formhash: formhash }).toString(),
+                body: new URLSearchParams({
+                    task: '3', uid: username, pwd: password, formhash: '03e22cb9',
+                }).toString(),
                 redirect: 'manual'
             });
             const retryBody = await retryResp.text();
-            const retryCookies = parseSetCookie(retryResp.headers);
-            try {
-                bodyData = JSON.parse(retryBody);
-                Object.assign(loginCookies, retryCookies);
-            } catch (e2) {
-                return { success: false, msg: '登录响应解析失败，原始响应(前200): ' + retryBody.substring(0, 200) };
+            try { bodyData = JSON.parse(retryBody); } catch (e2) {
+                return { success: false, msg: '登录响应解析失败，原始: ' + retryBody.substring(0, 200) + '，headers: ' + JSON.stringify([...retryResp.headers]) };
             }
         } else {
-            return { success: false, msg: '登录响应解析失败，原始响应(前200): ' + body.substring(0, 200) };
+            return { success: false, msg: '登录响应解析失败，原始: ' + body.substring(0, 200) + '，headers: ' + JSON.stringify([...postResp.headers]) };
         }
     }
 
@@ -472,18 +441,40 @@ async function login(username, password) {
         return { success: false, msg: bodyData.info || bodyData.msg || '登录失败，请检查账号密码是否正确' };
     }
 
-    // 6. 组装 Cookie
+    // 从登录响应头提取 ylogin 和 phpdisk_info
+    const loginCookies = parseSetCookie(postResp.headers);
     const ylogin = loginCookies.ylogin || String(bodyData.id || '');
     const phpdisk_info = loginCookies.phpdisk_info || '';
+
     return {
         success: true,
         msg: '登录成功',
-        cookies: {
-            PHPSESSID: phpsessid,
-            ylogin: ylogin,
-            phpdisk_info: phpdisk_info,
-        }
+        cookies: { PHPSESSID: phpsessid, ylogin, phpdisk_info },
     };
+}
+
+/**
+ * 从 headers 中提取指定 cookie 的值
+ * 遍历所有 Set-Cookie 头，找到 name 对应的 value
+ */
+function extractCookieValue(headers, name) {
+    const all = typeof headers.getSetCookie === 'function'
+        ? headers.getSetCookie()
+        : [];
+    for (const cookie of all) {
+        const m = cookie.match(new RegExp(`^\\s*${name}\\s*=\\s*([^;\\s]+)`));
+        if (m) return m[1];
+    }
+    // 降级：遍历 headers
+    if (typeof headers.entries === 'function') {
+        for (const [key, value] of headers) {
+            if (key.toLowerCase() === 'set-cookie') {
+                const m = value.match(new RegExp(`${name}\\s*=\\s*([^;]+)`));
+                if (m) return m[1].trim();
+            }
+        }
+    }
+    return null;
 }
 
 async function getDirList(phpsessid, ylogin, phpdiskInfo, folderId = -1) {
