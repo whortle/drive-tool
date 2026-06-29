@@ -35,7 +35,8 @@ const ILENZOU_HEADERS = {
 };
 const DOUPLOAD_URL = 'https://pc.woozooo.com/doupload.php';
 const UPLOAD_URL = 'https://pc.woozooo.com/html5up.php';
-const LOGIN_URL = 'https://up.woozooo.com/mlogin.php';
+const LOGIN_URL = 'https://accounts.woozooo.com/accounts.php?action=login&ref=pc.woozooo.com';
+const ACCOUNTS_API = 'https://accounts.woozooo.com/accounts.php';
 const VALID_SUFFIX = ['ppt','xapk','ke','azw','cpk','gho','dwg','db','docx','deb','e','ttf','xls','bat','crx','rpm','txf','pdf','apk','ipa','txt','mobi','osk','dmg','rp','osz','jar','ttc','z','w3x','xlsx','cetrainer','ct','rar','mp3','pptx','mobileconfig','epub','imazingapp','doc','iso','img','appimage','7z','rplib','lolgezi','exe','azw3','zip','conf','tar','dll','flac','xpa','lua','cad','hwt','accdb','ce','xmind','enc','bds','bdi','ssf','it','gz'];
 
 async function dbInit(db) {
@@ -336,13 +337,13 @@ function solveAcwV2(html) {
 }
 
 /**
- * 蓝奏云账号密码登录
+ * 蓝奏云账号密码登录（通过 accounts.woozooo.com 登录中心）
  * 
  * 流程:
- * 1. GET mlogin.php → acw 挑战(获取 arg1) + 获取 acw_tc/cdn_sec_tc
+ * 1. GET accounts.woozooo.com 登录页 → acw 挑战(获取 arg1)
  * 2. 解算 acw_sc__v2 cookie
- * 3. 带 acw cookie 重新 GET → 获得 PHPSESSID + 登录页面 HTML
- * 4. POST 登录(带 PHPSESSID) → 获得 ylogin + phpdisk_info
+ * 3. POST 到 /accounts.php (task=uselogin) → 获得 JSON {zt:1, msgs:跳转URL}
+ * 4. GET 跳转URL (pc.woozooo.com/acc.php?t=...) → 获得 PHPSESSID, ylogin, phpdisk_info
  */
 async function login(username, password) {
     // ====== 第1步: GET 触发 acw 挑战 ======
@@ -351,7 +352,7 @@ async function login(username, password) {
         headers: {
             ...LANZOU_HEADERS,
             'User-Agent': DESKTOP_UA,
-            'Referer': 'https://up.woozooo.com/',
+            'Referer': 'https://pc.woozooo.com/',
         },
         redirect: 'manual'
     });
@@ -361,120 +362,97 @@ async function login(username, password) {
         return { success: false, msg: '登录页面未触发 acw 挑战，无法继续' };
     }
 
-    // ====== 第2步: 带 acw cookie 重 GET，获取 PHPSESSID 和登录页面 ======
-    // 使用 redirect: 'follow' 确保获取到最终页面内容
-    const resp2 = await fetch(LOGIN_URL, {
-        method: 'GET',
-        headers: {
-            ...LANZOU_HEADERS,
-            'User-Agent': DESKTOP_UA,
-            'Referer': 'https://up.woozooo.com/',
-            'Cookie': `acw_sc__v2=${acwVal}`,
-        },
-        redirect: 'follow'
-    });
-    const html2 = await resp2.text();
-
-    // 从 headers 中提取 PHPSESSID（可能来自重定向过程中的任意 Set-Cookie）
-    const phpsessid = extractCookieValue(resp2.headers, 'PHPSESSID');
-    if (!phpsessid) {
-        return { success: false, msg: '获取 Session 失败，未获得 PHPSESSID cookie' };
-    }
-
-    // ====== 第3步: POST 登录 ======
-    const cookieStr = `PHPSESSID=${phpsessid}; acw_sc__v2=${acwVal}`;
-    const postResp = await fetch(LOGIN_URL, {
+    // ====== 第2步: POST 发登录请求 ======
+    // 只需带 acw_sc__v2 cookie，不需要 PHPSESSID
+    const postResp = await fetch(ACCOUNTS_API, {
         method: 'POST',
         headers: {
             ...LANZOU_HEADERS,
             'User-Agent': DESKTOP_UA,
             'Referer': LOGIN_URL,
-            'Origin': 'https://up.woozooo.com',
+            'Origin': 'https://accounts.woozooo.com',
             'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
             'X-Requested-With': 'XMLHttpRequest',
             'Accept': 'application/json, text/javascript, */*; q=0.01',
-            'Cookie': cookieStr,
+            'Cookie': `acw_sc__v2=${acwVal}`,
         },
         body: new URLSearchParams({
-            task: '3',
-            uid: username,
-            pwd: password,
-            formhash: '03e22cb9',
+            task: 'uselogin',
+            username: username,
+            password: password,
+            ref: 'pc.woozooo.com',
         }).toString(),
         redirect: 'manual'
     });
     const body = await postResp.text();
 
-    // ====== 第4步: 解析登录响应 ======
-    // 先尝试解析 JSON
+    // ====== 第3步: 解析登录响应 ======
     let bodyData;
     try { bodyData = JSON.parse(body); } catch (e) {
-        // 如果 POST 也触发 acw 挑战（极小概率），尝试重解后重试
+        // POST 也可能触发 acw 挑战（极小概率）
         const retryAcw = solveAcwV2(body);
         if (retryAcw) {
-            const retryCookie = `PHPSESSID=${phpsessid}; acw_sc__v2=${retryAcw}`;
-            const retryResp = await fetch(LOGIN_URL, {
+            const retryResp = await fetch(ACCOUNTS_API, {
                 method: 'POST',
                 headers: {
                     ...LANZOU_HEADERS, 'User-Agent': DESKTOP_UA,
-                    'Referer': LOGIN_URL, 'Origin': 'https://up.woozooo.com',
+                    'Referer': LOGIN_URL, 'Origin': 'https://accounts.woozooo.com',
                     'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
                     'X-Requested-With': 'XMLHttpRequest',
                     'Accept': 'application/json, text/javascript, */*; q=0.01',
-                    'Cookie': retryCookie,
+                    'Cookie': `acw_sc__v2=${retryAcw}`,
                 },
                 body: new URLSearchParams({
-                    task: '3', uid: username, pwd: password, formhash: '03e22cb9',
+                    task: 'uselogin', username, password, ref: 'pc.woozooo.com',
                 }).toString(),
                 redirect: 'manual'
             });
             const retryBody = await retryResp.text();
             try { bodyData = JSON.parse(retryBody); } catch (e2) {
-                return { success: false, msg: '登录响应解析失败，原始: ' + retryBody.substring(0, 200) + '，headers: ' + JSON.stringify([...retryResp.headers]) };
+                return { success: false, msg: '登录响应解析失败(重试后)，原始: ' + retryBody.substring(0, 200) + '，headers: ' + JSON.stringify([...retryResp.headers]) };
             }
         } else {
             return { success: false, msg: '登录响应解析失败，原始: ' + body.substring(0, 200) + '，headers: ' + JSON.stringify([...postResp.headers]) };
         }
     }
 
-    if (bodyData.zt !== 1) {
-        return { success: false, msg: bodyData.info || bodyData.msg || '登录失败，请检查账号密码是否正确' };
+    // zt=1 表示登录成功（zt 是整数，不是字符串）
+    if (String(bodyData.zt) !== '1') {
+        return { success: false, msg: bodyData.msgs || bodyData.info || '登录失败，请检查账号密码是否正确' };
     }
 
-    // 从登录响应头提取 ylogin 和 phpdisk_info
-    const loginCookies = parseSetCookie(postResp.headers);
-    const ylogin = loginCookies.ylogin || String(bodyData.id || '');
-    const phpdisk_info = loginCookies.phpdisk_info || '';
+    // ====== 第4步: 访问跳转 URL 获取完整 cookies ======
+    const redirectUrl = bodyData.msgs;
+    if (!redirectUrl) {
+        return { success: false, msg: '登录响应缺少跳转 URL' };
+    }
+
+    const accResp = await fetch(redirectUrl, {
+        method: 'GET',
+        headers: {
+            ...LANZOU_HEADERS,
+            'User-Agent': DESKTOP_UA,
+            'Referer': LOGIN_URL,
+            'Cookie': `acw_sc__v2=${acwVal}`,
+        },
+        redirect: 'follow'
+    });
+
+    // 从 acc.php 响应头提取 cookies
+    const accCookies = parseSetCookie(accResp.headers);
+    const phpsessid = accCookies.PHPSESSID || '';
+    const ylogin = accCookies.ylogin || '';
+    const phpdisk_info = accCookies.phpdisk_info || '';
+
+    if (!phpsessid || !ylogin) {
+        return { success: false, msg: `获取 Cookie 失败，仅获得: PHPSESSID=${phpsessid}, ylogin=${ylogin}` };
+    }
 
     return {
         success: true,
         msg: '登录成功',
         cookies: { PHPSESSID: phpsessid, ylogin, phpdisk_info },
     };
-}
-
-/**
- * 从 headers 中提取指定 cookie 的值
- * 遍历所有 Set-Cookie 头，找到 name 对应的 value
- */
-function extractCookieValue(headers, name) {
-    const all = typeof headers.getSetCookie === 'function'
-        ? headers.getSetCookie()
-        : [];
-    for (const cookie of all) {
-        const m = cookie.match(new RegExp(`^\\s*${name}\\s*=\\s*([^;\\s]+)`));
-        if (m) return m[1];
-    }
-    // 降级：遍历 headers
-    if (typeof headers.entries === 'function') {
-        for (const [key, value] of headers) {
-            if (key.toLowerCase() === 'set-cookie') {
-                const m = value.match(new RegExp(`${name}\\s*=\\s*([^;]+)`));
-                if (m) return m[1].trim();
-            }
-        }
-    }
-    return null;
 }
 
 async function getDirList(phpsessid, ylogin, phpdiskInfo, folderId = -1) {
