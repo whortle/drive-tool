@@ -348,9 +348,10 @@ async function fetchWithAcw(url, headers = {}) {
     });
     const html1 = await resp1.text();
     const acw = solveAcwV2(html1);
+    // 先解析 resp1 的 cookies（可能包含 PHPSESSID）
+    const c1 = parseSetCookie(resp1.headers);
     if (!acw) {
         // 没有 acw 挑战，直接返回
-        const c1 = parseSetCookie(resp1.headers);
         return { status: resp1.status, html: html1, cookies: c1, acw: '' };
     }
     // 第二次请求，带 acw cookie
@@ -365,7 +366,9 @@ async function fetchWithAcw(url, headers = {}) {
     });
     const html2 = await resp2.text();
     const c2 = parseSetCookie(resp2.headers);
-    return { status: resp2.status, html: html2, cookies: c2, acw: acw };
+    // 合并 resp1 和 resp2 的 cookies（resp1 可能先设置了 PHPSESSID）
+    const mergedCookies = { ...c1, ...c2 };
+    return { status: resp2.status, html: html2, cookies: mergedCookies, acw: acw };
 }
 
 /**
