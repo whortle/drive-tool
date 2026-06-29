@@ -622,13 +622,28 @@ async function parseLanzou(url, pwd) {
     }
     if (!sign) return { success: false, msg: '获取失败，无法解析sign' };
 
-    const wsm = cleaned.match(/'([0-9])'/);
-    const websign = wsm ? wsm[1] : '';
-    const wskm = cleaned.match(/'([a-zA-Z0-9]{4})'/);
-    const websignkey = wskm ? wskm[1] : '';
+    // 提取 wp_sign 与 ajaxdata（iframe 流程）
+    const wpSignMatch = cleaned.match(/var\s+wp_sign\s*=\s*'([^']+)'/);
+    const ajaxdataMatch = cleaned.match(/var\s+ajaxdata\s*=\s*'([^']+)'/);
+    const wpSign = wpSignMatch ? wpSignMatch[1] : '';
+    const ajaxdata = ajaxdataMatch ? ajaxdataMatch[1] : '';
 
     const kdMatch = cleaned.match(/kdns\s*=\s*(\d+)/);
     const kd = kdMatch ? kdMatch[1] : '1';
+
+    // 判断是否为密码文件
+    const needPassword = cleaned.includes("document.getElementById('pwd').value;") ||
+                         html.includes('<title>文件</title>') ||
+                         html.includes('提取码') ||
+                         html.includes('请输入密码');
+    if (needPassword && !pwd)
+        return { success: false, msg: '请输入密码', need_password: true };
+
+    // 构建 POST 数据：密码文件与免密码文件参数不同
+    const finalSign = wpSign || sign;
+    const postParams = needPassword
+        ? { action: 'downprocess', sign: finalSign, p: pwd, kd }
+        : { action: 'downprocess', websignkey: ajaxdata, signs: ajaxdata, sign: finalSign, websign: '', kd, ves: '1' };
 
     // 使用原始域名发起ajaxm.php POST请求，添加acw_sc__v2重试
     let ajaxText = null;
@@ -653,7 +668,7 @@ async function parseLanzou(url, pwd) {
         const ajaxResp = await fetch(`https://${usedDomain}/ajaxm.php?file=${fileid}`, {
             method: 'POST',
             headers: ajaxHeaders,
-            body: new URLSearchParams({ action:'downprocess', sign, kd, p:pwd||'' }).toString()
+            body: new URLSearchParams(postParams).toString()
         });
         ajaxText = await ajaxResp.text();
 
