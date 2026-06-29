@@ -272,12 +272,34 @@ function lanzouHeaders(cookie, referer = 'https://pc.woozooo.com/mydisk.php') {
 }
 
 /**
- * 解析 Set-Cookie 头为对象
+ * 从 Headers 对象中提取所有 Set-Cookie 的 name=value
+ * 标准 Headers.get('Set-Cookie') 只返回第一个，需要通过 entries 遍历获取全部
  */
-function parseSetCookie(setCookieHeader) {
+function parseSetCookie(headers) {
     const cookies = {};
-    if (!setCookieHeader) return cookies;
-    const parts = setCookieHeader.split(/,+(?=[^;=,]+=)/);
+    // Cloudflare Workers 支持 getSetCookie() 方法 (返回数组)
+    if (typeof headers.getSetCookie === 'function') {
+        const all = headers.getSetCookie();
+        for (const cookie of all) {
+            const m = cookie.match(/^\s*([^=;\s]+)=([^;]*)/);
+            if (m) cookies[m[1].trim()] = m[2].trim();
+        }
+        return cookies;
+    }
+    // 降级：遍历所有 headers
+    if (typeof headers.entries === 'function') {
+        for (const [key, value] of headers) {
+            if (key.toLowerCase() === 'set-cookie') {
+                const m = value.match(/^\s*([^=;\s]+)=([^;]*)/);
+                if (m) cookies[m[1].trim()] = m[2].trim();
+            }
+        }
+        return cookies;
+    }
+    // 最终降级：从 get() 返回的字符串中解析
+    const header = headers.get('set-cookie') || '';
+    if (!header) return cookies;
+    const parts = header.split(/,+(?=[^;=,]+=)/);
     for (const part of parts) {
         const m = part.match(/^\s*([^=;\s]+)=([^;]*)/);
         if (m) cookies[m[1].trim()] = m[2].trim();
@@ -328,7 +350,7 @@ async function fetchWithAcw(url, headers = {}) {
     const acw = solveAcwV2(html1);
     if (!acw) {
         // 没有 acw 挑战，直接返回
-        const c1 = parseSetCookie(resp1.headers.get('set-cookie') || '');
+        const c1 = parseSetCookie(resp1.headers);
         return { status: resp1.status, html: html1, cookies: c1, acw: '' };
     }
     // 第二次请求，带 acw cookie
@@ -342,7 +364,7 @@ async function fetchWithAcw(url, headers = {}) {
         redirect: 'manual'
     });
     const html2 = await resp2.text();
-    const c2 = parseSetCookie(resp2.headers.get('set-cookie') || '');
+    const c2 = parseSetCookie(resp2.headers);
     return { status: resp2.status, html: html2, cookies: c2, acw: acw };
 }
 
@@ -410,7 +432,7 @@ async function login(username, password) {
     const body = await postResp.text();
 
     // 5. 解析登录响应和 Cookie
-    const loginCookies = parseSetCookie(postResp.headers.get('set-cookie') || '');
+    const loginCookies = parseSetCookie(postResp.headers);
     let bodyData;
     try { bodyData = JSON.parse(body); } catch (e) {
         // 如果 POST 也触发 acw 挑战，尝试重解
@@ -431,7 +453,7 @@ async function login(username, password) {
                 redirect: 'manual'
             });
             const retryBody = await retryResp.text();
-            const retryCookies = parseSetCookie(retryResp.headers.get('set-cookie') || '');
+            const retryCookies = parseSetCookie(retryResp.headers);
             try {
                 bodyData = JSON.parse(retryBody);
                 Object.assign(loginCookies, retryCookies);
