@@ -355,14 +355,39 @@ async function fetchWithAcw(url, headers = {}) {
  * 3. 带 acw cookie 重新 GET → 获得 PHPSESSID
  * 4. POST 登录(带 PHPSESSID + acw cookie) → 获得 ylogin + phpdisk_info
  */
+/**
+ * 从页面 HTML 中提取 formhash
+ */
+function extractFormhash(html) {
+    // 匹配 var formhash = 'xxx' 或 formhash: 'xxx' 或 name="formhash" value="xxx"
+    const patterns = [
+        /formhash\s*[=:]\s*['"](\w+)['"]/,
+        /name=['"]formhash['"]\s+value=['"](\w+)['"]/,
+        /id=['"]formhash['"]\s+value=['"](\w+)['"]/,
+        /formhash['"]?\s*:\s*['"](\w+)['"]/,
+    ];
+    for (const p of patterns) {
+        const m = html.match(p);
+        if (m) return m[1];
+    }
+    return null;
+}
+
 async function login(username, password) {
-    // 1-3. 通过 acw 防护获取 PHPSESSID
+    // 1-3. 通过 acw 防护获取 PHPSESSID 和页面 HTML
     const acwResult = await fetchWithAcw(LOGIN_URL, { 'Referer': 'https://up.woozooo.com/' });
     const phpsessid = acwResult.cookies.PHPSESSID || '';
     const acwCookie = acwResult.acw;
+    const pageHtml = acwResult.html;
 
     if (!phpsessid) {
         return { success: false, msg: '获取 Session 失败，服务器返回了 acw 挑战但未获得 PHPSESSID' };
+    }
+
+    // 从页面提取动态 formhash
+    let formhash = extractFormhash(pageHtml);
+    if (!formhash) {
+        formhash = '03e22cb9'; // fallback
     }
 
     // 4. 用 Session 发起 POST 登录
@@ -379,7 +404,7 @@ async function login(username, password) {
             'Accept': 'application/json, text/javascript, */*; q=0.01',
             'Cookie': cookieStr,
         },
-        body: new URLSearchParams({ task: '3', uid: username, pwd: password, formhash: '03e22cb9' }).toString(),
+        body: new URLSearchParams({ task: '3', uid: username, pwd: password, formhash: formhash }).toString(),
         redirect: 'manual'
     });
     const body = await postResp.text();
@@ -402,7 +427,7 @@ async function login(username, password) {
                     'Accept': 'application/json, text/javascript, */*; q=0.01',
                     'Cookie': retryCookie,
                 },
-                body: new URLSearchParams({ task: '3', uid: username, pwd: password, formhash: '03e22cb9' }).toString(),
+                body: new URLSearchParams({ task: '3', uid: username, pwd: password, formhash: formhash }).toString(),
                 redirect: 'manual'
             });
             const retryBody = await retryResp.text();
@@ -411,10 +436,10 @@ async function login(username, password) {
                 bodyData = JSON.parse(retryBody);
                 Object.assign(loginCookies, retryCookies);
             } catch (e2) {
-                return { success: false, msg: '登录响应解析失败，原始响应: ' + retryBody.substring(0, 100) };
+                return { success: false, msg: '登录响应解析失败，原始响应(前200): ' + retryBody.substring(0, 200) };
             }
         } else {
-            return { success: false, msg: '登录响应解析失败，原始响应: ' + body.substring(0, 100) };
+            return { success: false, msg: '登录响应解析失败，原始响应(前200): ' + body.substring(0, 200) };
         }
     }
 
