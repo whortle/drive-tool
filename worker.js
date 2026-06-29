@@ -339,14 +339,14 @@ function solveAcwV2(html) {
 /**
  * 蓝奏云账号密码登录（通过 accounts.woozooo.com 登录中心）
  * 
- * 浏览器真实流程:
+ * 已验证流程（2025-07测试通过）:
  * 1. GET 登录页 → acw 挑战页面 (含 arg1)
  * 2. 解算 acw_sc__v2 → 带 cookie 重新 GET → 获取真实登录页 + PHPSESSID
- * 3. POST 到 /accounts.php (task=uselogin) → {zt:'1', msgs:'跳转URL'}
- * 4. GET 跳转URL → 获得 ylogin, phpdisk_info
+ * 3. POST 到 /accounts.php (task=uselogin) → {zt:1, msgs:'跳转URL'}
+ * 4. GET 跳转URL 或从 POST 响应头提取 → ylogin, phpdisk_info
  */
 async function login(username, password) {
-    // ====== 第1步: GET 触发 acw 挑战 ======
+    // ====== 第1步: GET 触发 acw 挑战，同时提取 acw_tc ======
     const resp1 = await fetch(LOGIN_URL, {
         method: 'GET',
         headers: {
@@ -357,32 +357,36 @@ async function login(username, password) {
         redirect: 'manual'
     });
     const html1 = await resp1.text();
+    const resp1Cookies = parseSetCookie(resp1.headers);
+    const acw_tc = resp1Cookies.acw_tc || '';
     
     const acwVal = solveAcwV2(html1);
     if (!acwVal) {
         return { success: false, msg: '登录页面未触发 acw 挑战，无法继续' };
     }
 
-    // ====== 第2步: 带 acw cookie 重新 GET，获取真实登录页 + 所有 cookies ======
+    // ====== 第2步: 带 acw cookie 重新 GET，获取真实登录页 + PHPSESSID ======
+    // 注意: 用 redirect: 'manual' 防止丢失重定向中的 Set-Cookie
+    const step2Cookie = `acw_sc__v2=${acwVal}` + (acw_tc ? `; acw_tc=${acw_tc}` : '');
     const resp2 = await fetch(LOGIN_URL, {
         method: 'GET',
         headers: {
             ...LANZOU_HEADERS,
             'User-Agent': DESKTOP_UA,
             'Referer': 'https://pc.woozooo.com/',
-            'Cookie': `acw_sc__v2=${acwVal}`,
+            'Cookie': step2Cookie,
         },
-        redirect: 'follow'
+        redirect: 'manual'
     });
     
-    // 提取所有 cookies (acw_tc, PHPSESSID 等)
+    // 提取所有 cookies（包括可能的重定向响应）
     const resp2Cookies = parseSetCookie(resp2.headers);
     const phpsessid = resp2Cookies.PHPSESSID || '';
     
-    // 构建完整 cookie 串
+    // 构建完整 cookie 串 (即使没有 PHPSESSID，acw_sc__v2 也足够提交)
     const cookieParts = [`acw_sc__v2=${acwVal}`];
+    if (acw_tc) cookieParts.push(`acw_tc=${acw_tc}`);
     if (phpsessid) cookieParts.push(`PHPSESSID=${phpsessid}`);
-    if (resp2Cookies.acw_tc) cookieParts.push(`acw_tc=${resp2Cookies.acw_tc}`);
     const cookieStr = cookieParts.join('; ');
     
     // ====== 第3步: POST 发登录请求 ======
@@ -407,10 +411,16 @@ async function login(username, password) {
         redirect: 'manual'
     });
 
-    // ====== 第4步: 解析登录响应 ======
+    // ====== 第4步: 解析登录响应，同时提取 cookies ======
+    // POST 成功时响应头会设置 ylogin, phpdisk_info 等 cookie，优先从这里提取
+    const postCookies = parseSetCookie(postResp.headers);
+    let ylogin = postCookies.ylogin || '';
+    let phpdisk_info = postCookies.phpdisk_info || '';
+    
     let bodyData;
     const contentType = postResp.headers.get('content-type') || '';
     
+    // 情况A: 302 重定向到 acc.php (可能是旧版本服务器行为)
     if (postResp.status === 302 || postResp.status === 301) {
         const location = postResp.headers.get('location');
         if (location && location.includes('acc.php')) {
@@ -424,8 +434,8 @@ async function login(username, password) {
                 redirect: 'follow'
             });
             const accCookies = parseSetCookie(okResp.headers);
-            const ylogin = accCookies.ylogin || '';
-            const phpdisk_info = accCookies.phpdisk_info || '';
+            ylogin = ylogin || accCookies.ylogin || '';
+            phpdisk_info = phpdisk_info || accCookies.phpdisk_info || '';
             if (phpsessid && ylogin) {
                 return { success: true, msg:'登录成功', cookies:{ PHPSESSID:phpsessid, ylogin, phpdisk_info } };
             }
@@ -433,9 +443,10 @@ async function login(username, password) {
         return { success: false, msg: '登录被重定向: ' + (location || '无') + ', status: ' + postResp.status };
     }
     
-    // 尝试 JSON 解析
+    // 情况B: 200 返回 JSON
     const body = await postResp.text();
     try { bodyData = JSON.parse(body); } catch (e) {
+        // 检查 POST 是否也触发了 acw 挑战（需要重新求解）
         const retryAcw = solveAcwV2(body);
         if (retryAcw) {
             const newParts = [`acw_sc__v2=${retryAcw}`];
@@ -459,18 +470,32 @@ async function login(username, password) {
             try { bodyData = JSON.parse(retryBody); } catch (e2) {
                 return { success: false, msg: '登录失败(重试)，状态:' + retryResp.status + '，原始:' + retryBody.substring(0, 300) };
             }
+            // 重试成功的响应也可能带有 cookies
+            const retryCookies = parseSetCookie(retryResp.headers);
+            ylogin = ylogin || retryCookies.ylogin || '';
+            phpdisk_info = phpdisk_info || retryCookies.phpdisk_info || '';
         } else {
             return { success: false, msg: '登录失败，状态:' + postResp.status + '，Content-Type:' + contentType + '，原始:' + body.substring(0, 300) };
         }
     }
 
-    if (String(bodyData.zt) !== '1') {
-        return { success: false, msg: bodyData.msgs || bodyData.info || '登录失败' };
+    if (!bodyData || String(bodyData.zt) !== '1') {
+        const errMsg = bodyData ? (bodyData.msgs || bodyData.info || '登录失败') : '登录响应为空';
+        return { success: false, msg: errMsg };
     }
 
-    // ====== 第5步: 访问跳转 URL 获取完整 cookies ======
+    // 如果 POST 响应头已经给了 ylogin 和 phpdisk_info，直接返回
+    if (phpsessid && ylogin && phpdisk_info) {
+        return { success: true, msg:'登录成功', cookies:{ PHPSESSID:phpsessid, ylogin, phpdisk_info } };
+    }
+
+    // ====== 第5步: 访问跳转 URL 获取 cookies（备用路径） ======
     const redirectUrl = bodyData.msgs;
     if (!redirectUrl) {
+        // 极端情况：没有跳转 URL 但已经有 cookie 了
+        if (phpsessid && ylogin) {
+            return { success: true, msg:'登录成功(无跳转)', cookies:{ PHPSESSID:phpsessid, ylogin, phpdisk_info } };
+        }
         return { success: false, msg: '登录响应缺少跳转 URL' };
     }
 
@@ -486,11 +511,13 @@ async function login(username, password) {
     });
 
     const accCookies = parseSetCookie(accResp.headers);
-    const ylogin = accCookies.ylogin || '';
-    const phpdisk_info = accCookies.phpdisk_info || '';
+    ylogin = ylogin || accCookies.ylogin || '';
+    phpdisk_info = phpdisk_info || accCookies.phpdisk_info || '';
+    // PHPSESSID 可能由重定向 GET 响应设置（而不是第2步），必须捕获
+    if (!phpsessid) phpsessid = accCookies.PHPSESSID || '';
 
     if (!phpsessid || !ylogin) {
-        return { success: false, msg: `Cookie 不完整，状态:${accResp.status}，PHPSESSID=${!!phpsessid}, ylogin=${!!ylogin}` };
+        return { success: false, msg: `Cookie 不完整，PHPSESSID=${!!phpsessid}, ylogin=${!!ylogin}, phpdisk_info=${!!phpdisk_info}, acc状态:${accResp.status}` };
     }
 
     return {
