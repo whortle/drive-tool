@@ -20,7 +20,6 @@ const CACHE_TTL = 1200;
 const DB_NAME = 'drive-tool';
 const AES_KEY = 'lanZouY-disk-app';
 const DESKTOP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
-const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36';
 const ILENZOU_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
 const LANZOU_HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
@@ -719,7 +718,7 @@ async function getIlanzouDownloadUrl(fileIds, uuid) {
 async function parseLanzou(url, pwd) {
     url = url.trim();
     // 提取原始域名和分享ID（兼容子域名如 wwbjq.lanzoub.com）
-    const urlMatch = url.match(/(?:https?:\/\/)?([a-z0-9-]+\.)?(lanzou[a-z]{0,2}\.com)\/(?:tp\/)?([a-zA-Z0-9_\-]+)(\?[\s\S]*)?/i);
+    const urlMatch = url.match(/(?:https?:\/\/)?([a-z0-9-]+\.)?(lanz[a-z]{1,3}\.com)\/(?:tp\/)?([a-zA-Z0-9_\-]+)(\?[\s\S]*)?/i);
     if (!urlMatch) return { success: false, msg: '无效的分享链接' };
     const originalDomain = (urlMatch[1] || '') + urlMatch[2];
     const shareId = urlMatch[3];
@@ -1004,52 +1003,6 @@ async function getLanzouDirectLink(url, refererDomain = '') {
         break;
     }
     return '';
-}
-
-
-
-
-function md5(str) {
-    function md5cycle(x, k) {
-        let a=x[0],b=x[1],c=x[2],d=x[3];
-        a=ff(a,b,c,d,k[0],7,-680876936);d=ff(d,a,b,c,k[1],12,-389564586);c=ff(c,d,a,b,k[2],17,606105819);b=ff(b,c,d,a,k[3],22,-1044525330);
-        a=ff(a,b,c,d,k[4],7,-176418897);d=ff(d,a,b,c,k[5],12,1200080426);c=ff(c,d,a,b,k[6],17,-1473231341);b=ff(b,c,d,a,k[7],22,-45705983);
-        a=ff(a,b,c,d,k[8],7,1770035416);d=ff(d,a,b,c,k[9],12,-1958414417);c=ff(c,d,a,b,k[10],17,-42063);b=ff(b,c,d,a,k[11],22,-1990404162);
-        a=ff(a,b,c,d,k[12],7,1804603682);d=ff(d,a,b,c,k[13],12,-40341101);c=ff(c,d,a,b,k[14],17,-1502002290);b=ff(b,c,d,a,k[15],22,1236535329);
-        a=gg(a,b,c,d,k[1],5,-165796510);d=gg(d,a,b,c,k[6],9,-1069501632);c=gg(c,d,a,b,k[11],14,643717713);b=gg(b,c,d,a,k[0],20,-373897302);
-        a=gg(a,b,c,d,k[5],5,-701558691);d=gg(d,a,b,c,k[10],9,38016083);c=gg(c,d,a,b,k[15],14,-660478335);b=gg(b,c,d,a,k[4],20,-405537848);
-        a=gg(a,b,c,d,k[9],5,568446438);d=gg(d,a,b,c,k[14],9,-1019803690);c=gg(c,d,a,b,k[3],14,-187363961);b=gg(b,c,d,a,k[8],20,1163531501);
-        a=gg(a,b,c,d,k[13],5,-1444681467);d=gg(d,a,b,c,k[2],9,-51403784);c=gg(c,d,a,b,k[7],14,1735328473);b=gg(b,c,d,a,k[12],20,-1926607734);
-        a=hh(a,b,c,d,k[5],4,-378558);d=hh(d,a,b,c,k[8],11,-2022574463);c=hh(c,d,a,b,k[11],16,1839030562);b=hh(b,c,d,a,k[14],23,-35309556);
-        a=hh(a,b,c,d,k[1],4,-1530992060);d=hh(d,a,b,c,k[4],11,1272893353);c=hh(c,d,a,b,k[7],16,-155497632);b=hh(b,c,d,a,k[10],23,-1094730640);
-        a=hh(a,b,c,d,k[13],4,681279174);d=hh(d,a,b,c,k[0],11,-358537222);c=hh(c,d,a,b,k[3],16,-722521979);b=hh(b,c,d,a,k[6],23,76029189);
-        a=hh(a,b,c,d,k[9],4,-640364487);d=hh(d,a,b,c,k[12],11,-421815835);c=hh(c,d,a,b,k[15],16,530742520);b=hh(b,c,d,a,k[2],23,-995338651);
-        a=ii(a,b,c,d,k[0],6,-198630844);d=ii(d,a,b,c,k[7],10,1126891415);c=ii(c,d,a,b,k[14],15,-1416354905);b=ii(b,c,d,a,k[5],21,-57434055);
-        a=ii(a,b,c,d,k[12],6,1700485571);d=ii(d,a,b,c,k[3],10,-1894986606);c=ii(c,d,a,b,k[10],15,-1051523);b=ii(b,c,d,a,k[1],21,-2054922799);
-        a=ii(a,b,c,d,k[8],6,1873313359);d=ii(d,a,b,c,k[15],10,-30611744);c=ii(c,d,a,b,k[6],15,-1560198380);b=ii(b,c,d,a,k[13],21,1309151649);
-        a=ii(a,b,c,d,k[4],6,-145523070);d=ii(d,a,b,c,k[11],10,-1120210379);c=ii(c,d,a,b,k[2],15,718787259);b=ii(b,c,d,a,k[9],21,-343485551);
-        x[0]=add32(a,x[0]);x[1]=add32(b,x[1]);x[2]=add32(c,x[2]);x[3]=add32(d,x[3]);
-    }
-    function cmn(q,a,b,x,s,t){a=add32(add32(a,q),add32(x,t));return add32((a<<s)|(a>>>(32-s)),b);}
-    function ff(a,b,c,d,x,s,t){return cmn((b&c)|((~b)&d),a,b,x,s,t);}
-    function gg(a,b,c,d,x,s,t){return cmn((b&d)|(c&(~d)),a,b,x,s,t);}
-    function hh(a,b,c,d,x,s,t){return cmn(b^c^d,a,b,x,s,t);}
-    function ii(a,b,c,d,x,s,t){return cmn(c^(b|(~d)),a,b,x,s,t);}
-    function add32(a,b){return(a+b)&0xFFFFFFFF;}
-    function md5blk(s){const md5blks=[];for(let i=0;i<64;i+=4)md5blks[i>>2]=s.charCodeAt(i)+(s.charCodeAt(i+1)<<8)+(s.charCodeAt(i+2)<<16)+(s.charCodeAt(i+3)<<24);return md5blks;}
-    function rhex(n){const hex_chr='0123456789abcdef';let s='';for(let j=0;j<4;j++)s+=hex_chr.charAt((n>>(j*8+4))&0x0F)+hex_chr.charAt((n>>(j*8))&0x0F);return s;}
-    function hex(x){for(let i=0;i<x.length;i++)x[i]=rhex(x[i]);return x.join('');}
-
-    let n=s.length,state=[1732584193,4023233417,2562383102,271733878],i;
-    for(i=64;i<=s.length;i+=64)md5cycle(state,md5blk(s.substring(i-64,i)));
-    s=s.substring(i-64);
-    const tail=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
-    for(i=0;i<s.length;i++)tail[i>>2]|=s.charCodeAt(i)<<((i%4)<<8);
-    tail[i>>2]|=0x80<<((i%4)<<8);
-    if(i>55){md5cycle(state,tail);for(i=0;i<16;i++)tail[i]=0;}
-    tail[14]=n*8;
-    md5cycle(state,tail);
-    return hex(state);
 }
 
 async function parseLanzouFolder(html, js, shareId, pwd, domain) {
@@ -1361,7 +1314,7 @@ function getFrontendHtml(stats) {
         'document.getElementById("listBtn").addEventListener("click",function(){if(!validateCookies()){showMsg(document.getElementById("uploadMsg"),"请先登录或填写 Cookie 并登录","error");return;}var fla=document.getElementById("fileListArea"),flc=document.getElementById("fileListContent");fla.style.display="block";flc.innerHTML="<div class=\\"loading\\"><span class=\\"spinner\\"></span>加载中...</div>";var fd=new FormData(),c=getCookieParams();fd.append("PHPSESSID",c.PHPSESSID);fd.append("ylogin",c.ylogin);fd.append("phpdisk_info",c.phpdisk_info);fd.append("folder_id",document.getElementById("folder_id").value);fetch("/api/files",{method:"POST",body:fd}).then(function(r){return r.json();}).then(function(resp){if(resp.success&&resp.files&&resp.files.length>0){var h="<table class=\\"file-table\\"><thead><tr><th>文件名</th><th>大小</th><th>类型</th><th>下载</th><th>密码</th><th>操作</th></tr></thead><tbody>";resp.files.forEach(function(f){h+="<tr><td>"+escapeHtml(f.name)+"</td><td>"+escapeHtml(f.size)+"</td><td>"+escapeHtml(f.type)+"</td><td>"+escapeHtml(f.downs)+"</td><td>"+(f.has_pwd?"<span class=\\"badge badge-yes\\">有</span>":"<span class=\\"badge badge-no\\">无</span>")+"</td><td><button class=\\"action-btn action-btn-share\\" data-fid=\\""+f.id+"\\" onclick=\\"getShareForFile(this.dataset.fid,true)\\">获取分享</button> <button class=\\"action-btn action-btn-delete\\" data-fid=\\""+f.id+"\\" data-name=\\""+escapeHtml(f.name)+"\\" onclick=\\"deleteItem(this.dataset.fid,true,this.dataset.name)\\">删除</button></td></tr>";});h+="</tbody></table>";flc.innerHTML=h;}else{flc.innerHTML="<div style=\\"text-align:center;color:#888;padding:12px\\">暂无文件</div>";}}).catch(function(){flc.innerHTML="<div style=\\"text-align:center;color:#888;padding:12px\\">加载失败</div>";});});',
         'window.getShareForFile=function(fid,isFile){var c=getCookieParams(),fd=new FormData();fd.append("PHPSESSID",c.PHPSESSID);fd.append("ylogin",c.ylogin);fd.append("phpdisk_info",c.phpdisk_info);fd.append("fid",fid);fd.append("is_file",isFile?"1":"0");fetch("/api/share",{method:"POST",body:fd}).then(function(r){return r.json();}).then(function(resp){if(resp.success){var h="<div class=\\"result-item\\" style=\\"border-left-color:#ab47bc\\"><div><div class=\\"label\\">分享名称</div><div class=\\"value\\">"+escapeHtml(resp.name||"")+"</div></div>";if(resp.url)h+="<div style=\\"margin-top:6px\\"><div class=\\"label\\">分享链接</div><div class=\\"value share-url\\">"+escapeHtml(resp.url)+" <button class=\\"copy-btn\\" onclick=\\"copyText(this.dataset.url)\\" data-url=\\""+escapeHtml(resp.url)+"\\">复制</button></div></div>";if(resp.pwd)h+="<div style=\\"margin-top:6px\\"><div class=\\"label\\">提取码</div><div class=\\"value\\">"+escapeHtml(resp.pwd)+" <button class=\\"copy-btn\\" onclick=\\"copyText(this.dataset.pwd)\\" data-pwd=\\""+escapeHtml(resp.pwd)+"\\">复制</button></div></div>";if(resp.desc)h+="<div style=\\"margin-top:6px\\"><div class=\\"label\\">描述</div><div class=\\"value\\">"+escapeHtml(resp.desc)+"</div></div>";h+="</div>";var a=document.getElementById("resultArea");a.style.display="block";document.getElementById("resultContent").innerHTML=h;a.scrollIntoView({behavior:"smooth"});}else{showMsg(document.getElementById("uploadMsg"),"\\u274c 获取分享信息失败: "+(resp.request_msg||resp.msg||"未知错误"),"error");}}).catch(function(){showMsg(document.getElementById("uploadMsg"),"\\u274c 网络错误","error");});};',
         'window.deleteItem=function(fid,isFile,name){if(!confirm("确定要删除 "+(name||"此项目")+" 吗？"))return;var c=getCookieParams(),fd=new FormData();fd.append("PHPSESSID",c.PHPSESSID);fd.append("ylogin",c.ylogin);fd.append("phpdisk_info",c.phpdisk_info);fd.append("fid",fid);fd.append("is_file",isFile?"1":"0");fetch("/api/delete",{method:"POST",body:fd}).then(function(r){return r.json();}).then(function(resp){if(resp.success){showMsg(document.getElementById("uploadMsg"),"\\u2705 删除成功","success");document.getElementById("listBtn").click();}else{showMsg(document.getElementById("uploadMsg"),"\\u274c 删除失败: "+(resp.msg||"未知错误"),"error");}}).catch(function(){showMsg(document.getElementById("uploadMsg"),"\\u274c 网络错误","error");});};',
-        'document.getElementById("parseBtn").addEventListener("click",function(){var url=document.getElementById("parse_url").value.trim(),pwd=document.getElementById("parse_pwd").value.trim(),msgEl=document.getElementById("parseMsg"),resultEl=document.getElementById("parseResult");if(!url){showMsg(msgEl,"请输入分享链接","error");return;}if(pwd.length>=60&&/^[A-Za-z0-9_+.=\\-]+$/.test(pwd)){url=url.split("?")[0]+"?webpage="+pwd;pwd="";}var th="";if(/ilanzou\\.com/i.test(url))th="蓝奏云优享版";else if(/lanzou[a-z]{0,2}\\.com/i.test(url))th="蓝奏云";else{showMsg(msgEl,"无法识别的链接","error");return;}hideMsg(msgEl);resultEl.innerHTML="<div class=\\"loading\\"><span class=\\"spinner\\"></span>正在解析"+th+"链接...</div>";var btn=this;btn.disabled=true;var fd=new FormData();fd.append("url",url);fd.append("pwd",pwd||"");fetch("/api/parse",{method:"POST",body:fd}).then(function(r){return r.json();}).then(function(resp){btn.disabled=false;window.currentParseResult=resp;window.currentParseUrl=url;window.currentParsePwd=pwd;if(resp.success){showMsg(msgEl,"\\u2705 "+resp.msg+(resp.from_cache?" (缓存)":""),"success");}else{showMsg(msgEl,"\\u274c "+resp.msg,"error");}displayResult("parseResult",resp);refreshStats();}).catch(function(){btn.disabled=false;showMsg(msgEl,"\\u274c 网络错误","error");resultEl.innerHTML="";});});',
+        'document.getElementById("parseBtn").addEventListener("click",function(){var url=document.getElementById("parse_url").value.trim(),pwd=document.getElementById("parse_pwd").value.trim(),msgEl=document.getElementById("parseMsg"),resultEl=document.getElementById("parseResult");if(!url){showMsg(msgEl,"请输入分享链接","error");return;}if(pwd.length>=60&&/^[A-Za-z0-9_+.=\\-]+$/.test(pwd)){url=url.split("?")[0]+"?webpage="+pwd;pwd="";}var th="";if(/ilanzou\\.com/i.test(url))th="蓝奏云优享版";else if(/lanz[a-z]{1,3}\\.com/i.test(url))th="蓝奏云";else{showMsg(msgEl,"无法识别的链接","error");return;}hideMsg(msgEl);resultEl.innerHTML="<div class=\\"loading\\"><span class=\\"spinner\\"></span>正在解析"+th+"链接...</div>";var btn=this;btn.disabled=true;var fd=new FormData();fd.append("url",url);fd.append("pwd",pwd||"");fetch("/api/parse",{method:"POST",body:fd}).then(function(r){return r.json();}).then(function(resp){btn.disabled=false;window.currentParseResult=resp;window.currentParseUrl=url;window.currentParsePwd=pwd;if(resp.success){showMsg(msgEl,"\\u2705 "+resp.msg+(resp.from_cache?" (缓存)":""),"success");}else{showMsg(msgEl,"\\u274c "+resp.msg,"error");}displayResult("parseResult",resp);refreshStats();}).catch(function(){btn.disabled=false;showMsg(msgEl,"\\u274c 网络错误","error");resultEl.innerHTML="";});});',
         'function displayResult(id,resp){var c=document.getElementById(id);if(!resp.success){var h="<div style=\\"color:#ef5350;padding:10px;background:rgba(244,67,54,0.1);border-radius:8px\\">"+escapeHtml(resp.msg||"解析失败");if(resp.need_password)h+="<br><span style=\\"color:#888;font-size:11px\\">该链接需要提取码，请在上方输入后重新解析</span>";h+="</div>";c.innerHTML=h;return;}var expStr="";if(typeof resp.expires_in==="number"&&resp.expires_in>0){var em=Math.floor(resp.expires_in/60),es=resp.expires_in%60;expStr=em>0?em+"分"+es+"秒":es+"秒";}if(resp.is_folder){var h="<div class=\\"result-item\\"><div><div class=\\"label\\">文件夹名称</div><div class=\\"value\\">"+escapeHtml(resp.folder_name||"")+"</div></div>";if(resp.folder_desc)h+="<div style=\\"margin-top:6px\\"><div class=\\"label\\">描述</div><div class=\\"value\\">"+escapeHtml(resp.folder_desc)+"</div></div>";h+="</div>";if(resp.sub_folders&&resp.sub_folders.length>0){h+="<div style=\\"margin-top:10px\\"><div class=\\"label\\">子文件夹</div><table class=\\"file-table\\"><thead><tr><th>名称</th><th>描述</th></tr></thead><tbody>";resp.sub_folders.forEach(function(f){h+="<tr><td>"+escapeHtml(f.name||f.id||"")+"</td><td>"+escapeHtml(f.desc||"")+"</td></tr>";});h+="</tbody></table></div>";}if(resp.file_list&&resp.file_list.length>0){h+="<table class=\\"file-table\\"><thead><tr><th>文件名</th><th>大小</th><th>时间</th><th>操作</th></tr></thead><tbody>";resp.file_list.forEach(function(f){h+="<tr><td>"+escapeHtml(f.name)+"</td><td>"+escapeHtml(f.size)+"</td><td>"+escapeHtml(f.time)+"</td><td><button class=\\"btn btn-primary btn-sm\\" data-file-id=\\""+f.id+"\\" data-domain=\\""+(resp.folder_domain||"www.lanzoui.com")+"\\" data-name=\\""+escapeHtml(f.name)+"\\" data-size=\\""+escapeHtml(f.size)+"\\" data-time=\\""+escapeHtml(f.time)+"\\" data-pwd=\\""+(resp.folder_pwd||"")+"\\" onclick=\\"viewFolderFile(this)\\"\\">查看</button></td></tr>";});h+="</tbody></table>";}else if(!resp.sub_folders||resp.sub_folders.length===0) h+="<div style=\\"text-align:center;color:#888;padding:12px\\">文件夹为空</div>";c.innerHTML=h;}else{var h="<div class=\\"result-item\\">";if(resp.file_name)h+="<div><div class=\\"label\\">文件名</div><div class=\\"value\\">"+escapeHtml(resp.file_name)+"</div></div>";if(resp.file_size)h+="<div style=\\"margin-top:6px\\"><div class=\\"label\\">文件大小</div><div class=\\"value\\">"+escapeHtml(resp.file_size)+"</div></div>";if(resp.file_id)h+="<div style=\\"margin-top:6px\\"><div class=\\"label\\">文件ID</div><div class=\\"value\\">"+escapeHtml(String(resp.file_id))+"</div></div>";if(resp.download_url)h+="<div style=\\"margin-top:6px\\"><div class=\\"label\\">下载直链</div><div class=\\"value share-url\\" style=\\"word-break:break-all\\">"+escapeHtml(resp.download_url)+" <button class=\\"copy-btn\\" onclick=\\"copyText(this.dataset.url)\\" data-url=\\""+escapeHtml(resp.download_url)+"\\">复制</button></div></div>";if(expStr)h+="<div style=\\"margin-top:6px\\"><div class=\\"label\\">有效期</div><div class=\\"value\\">"+escapeHtml(expStr)+"</div></div>";h+="</div>";h+="<div style=\\"display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;justify-content:center\\">";h+="<button class=\\"btn btn-primary btn-sm\\" onclick=\\"copyParseJSON()\\">复制JSON</button>";if(resp.download_url)h+="<button class=\\"btn btn-primary btn-sm\\" onclick=\\"copyDownloadLink()\\">生成永久直链并复制</button>";if(resp.download_url)h+="<button class=\\"btn btn-primary btn-sm\\" onclick=\\"downloadCurrentFile()\\">下载此文件</button>";h+="</div>";c.innerHTML=h;}}',
         'window.copyDownloadLink=function(){if(!window.currentParseUrl){showMsg(document.getElementById("parseMsg"),"\\u274c 没有可复制的链接","error");return;}var link=location.origin+"/?url="+encodeURIComponent(window.currentParseUrl);if(window.currentParsePwd)link+="&pwd="+encodeURIComponent(window.currentParsePwd);copyText(link);showMsg(document.getElementById("parseMsg"),"\\u2705 链接已复制","success");};',
         'window.copyParseJSON=function(){if(!window.currentParseResult){showMsg(document.getElementById("parseMsg"),"\\u274c 没有可复制的内容","error");return;}var jsonStr=JSON.stringify(window.currentParseResult,null,2);copyText(jsonStr);showMsg(document.getElementById("parseMsg"),"\\u2705 JSON已复制","success");};',
@@ -1788,7 +1741,7 @@ export default {
             if (!targetUrl) return jsonResponse({ success: false, msg: '请输入分享链接' });
 
             const isIlanzou = /ilanzou\.com/i.test(targetUrl);
-            const isLanzou = /lanzou[a-z]{0,2}\.com/i.test(targetUrl);
+            const isLanzou = /lanz[a-z]{1,3}\.com/i.test(targetUrl);
             if (!isIlanzou && !isLanzou) return jsonResponse({ success: false, msg: '无法识别的链接' });
 
             if (db) {
@@ -1892,7 +1845,7 @@ export default {
 
             if (qUrl) {
                 const isIlanzou = /ilanzou\.com/i.test(qUrl);
-                const isLanzou = /lanzou[a-z]{0,2}\.com/i.test(qUrl);
+                const isLanzou = /lanz[a-z]{1,3}\.com/i.test(qUrl);
                 if (!isIlanzou && !isLanzou) return jsonResponse({ success: false, msg: '无法识别的链接' });
 
                 if (db) {
