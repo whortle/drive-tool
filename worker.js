@@ -1141,7 +1141,7 @@ function htmlResponse(html) {
 }
 
 function getFrontendHtml(stats) {
-    const real_total = stats.total - stats.cached;
+    const real_total = stats.success + stats.failed;
     const pct_s = real_total > 0 ? ((stats.success/real_total)*100).toFixed(1) : (stats.total > 0 ? '100.0' : '0.0');
     const pct_c = stats.total > 0 ? ((stats.cached/stats.total)*100).toFixed(1) : '0.0';
     const S = [
@@ -1897,3 +1897,5 @@ export default {
         return jsonResponse({ success: false, msg: '未知路由' }, 404);
     }
 };
+
+
