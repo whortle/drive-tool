@@ -22,9 +22,13 @@
 
 ## ⭐ 项目热度
 
+[
 
+[![Star History Chart](https://api.star-history.com/chart?repos=whortle/drive-tool&type=date&legend=top-left&sealed_token=rN4YVX4AMMkZI5FWsiuU9Aui1ZWcEVwXCM3BBFpvYihPV5V3-8-klPSuj4Dmc7TV9Wy74A6p9A4jyYJp-PUkkNMbhGIf27Hwk6ezebv3B81-iD86YhDQ5Q)](https://www.star-history.com/?repos=whortle%2Fdrive-tool&type=date&legend=top-left)](https://www.star-history.com/?repos=whortle%2Fdrive-tool&type=date&legend=top-left)
 
-[![Star History Chart](https://api.star-history.com/chart?repos=whortle/drive-tool&type=date&legend=top-left&sealed_token=rN4YVX4AMMkZI5FWsiuU9Aui1ZWcEVwXCM3BBFpvYihPV5V3-8-klPSuj4Dmc7TV9Wy74A6p9A4jyYJp-PUkkNMbhGIf27Hwk6ezebv3B81-iD86YhDQ5Q)](https://www.star-history.com/?repos=whortle%2Fdrive-tool&type=date&legend=top-left)
+---
+
+***
 
 ## 📖 项目简介
 
