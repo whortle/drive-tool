@@ -22,7 +22,7 @@
 
 ## ⭐ 项目热度
 
-[![Stargazers over time](https://api.star-history.com/svg?repos=whortle/drive-tool&type=Date)](https://star-history.com/#whortle/drive-tool)
+[![World rank](https://warpchart.dev/api/badge/whortle/drive-tool.svg)](https://warpchart.dev/r/whortle/drive-tool)
 
 ---
 
