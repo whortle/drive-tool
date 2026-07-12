@@ -22,11 +22,13 @@
 
 ## ⭐ 项目热度
 
-[![Stargazers over time](https://api.star-history.com/svg?repos=whortle/drive-tool&type=Date)](https://star-history.com/#whortle/drive-tool)
-
----
-
-***
+<a href="https://www.star-history.com/?repos=whortle%2Fdrive-tool&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=whortle/drive-tool&type=date&theme=dark&legend=top-left&sealed_token=RIH17K3yrMUQ2_F6MWBNcLe_tGfmkoJmNwrYh_4CyTLKs1HZirHOd8v2nB7ZAd5H2y4U5UGoM_mFBQpnbwNL_g5S3Oj5JOPvkPinr_fSqw4t5g-tMdRDIw" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=whortle/drive-tool&type=date&legend=top-left&sealed_token=RIH17K3yrMUQ2_F6MWBNcLe_tGfmkoJmNwrYh_4CyTLKs1HZirHOd8v2nB7ZAd5H2y4U5UGoM_mFBQpnbwNL_g5S3Oj5JOPvkPinr_fSqw4t5g-tMdRDIw" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=whortle/drive-tool&type=date&legend=top-left&sealed_token=RIH17K3yrMUQ2_F6MWBNcLe_tGfmkoJmNwrYh_4CyTLKs1HZirHOd8v2nB7ZAd5H2y4U5UGoM_mFBQpnbwNL_g5S3Oj5JOPvkPinr_fSqw4t5g-tMdRDIw" />
+ </picture>
+</a>
 
 ## 📖 项目简介
 
