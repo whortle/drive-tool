@@ -881,7 +881,7 @@ async function parseLanzou(url, pwd) {
         ? { action: 'downprocess', sign: finalSign, p: pwd, kd }
         : { action: 'downprocess', websignkey: ajaxdata, signs: ajaxdata, sign: finalSign, websign: '', kd, ves: '1' };
 
-    // 使用原始域名发起ajaxm.php POST请求，添加acw_sc__v2重试
+    // 使用原始域名发起ajaxfile.php POST请求（2026-08 起端点由 ajaxm.php 改为 ajaxfile.php），添加acw_sc__v2重试
     let ajaxText = null;
     let ajaxCookie = '';
     for (let retry = 0; retry < 3; retry++) {
@@ -901,7 +901,7 @@ async function parseLanzou(url, pwd) {
         };
         if (ajaxCookie) ajaxHeaders['Cookie'] = ajaxCookie;
 
-        const ajaxResp = await fetch(`https://${usedDomain}/ajaxm.php?file=${fileid}`, {
+        const ajaxResp = await fetch(`https://${usedDomain}/ajaxfile.php?file=${fileid}`, {
             method: 'POST',
             headers: ajaxHeaders,
             body: new URLSearchParams(postParams).toString()
